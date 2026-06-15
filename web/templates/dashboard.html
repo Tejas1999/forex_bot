@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forex Trading Bot Dashboard</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+                <h1 style="margin:0;">🤖 Forex Trading Bot Dashboard</h1>
+                <div style="text-align:right;">
+                    <div id="botStatus" class="status-stopped">Bot Status: Stopped</div>
+                    <div id="currentSymbol" style="font-weight:600;margin-top:6px;">Symbol: BTCUSD</div>
+                </div>
+            </div>
+            <div class="symbols-container" style="margin-top:12px;">
+                <h3 style="margin:6px 0 8px 0">Trading Symbols</h3>
+                <div id="symbolsList"></div>
+            </div>
+        </div>
+
+        <div class="status-panel">
+            <h2>💰 Account Information</h2>
+            <div class="account-info">
+                <div class="info-item">
+                    <h3>Balance</h3>
+                    <div id="balance">$0.00</div>
+                </div>
+                <div class="info-item">
+                    <h3>Equity</h3>
+                    <div id="equity">$0.00</div>
+                </div>
+                <div class="info-item">
+                    <h3>Free Margin</h3>
+                    <div id="freeMargin">$0.00</div>
+                    <div id="marginLevel">Margin Level: 0%</div>
+                </div>
+                <div class="info-item">
+                    <h3>Positions</h3>
+                    <div id="positionCount">0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls" style="display:flex;justify-content:center;gap:12px;">
+            <button id="startBtn" class="btn btn-start" onclick="startBot()" style="padding:14px 28px;font-size:18px;">▶️ Start Bot</button>
+            <button id="stopBtn" class="btn btn-stop" onclick="stopBot()" disabled style="padding:14px 28px;font-size:18px;">⏹️ Stop Bot</button>
+            <button id="refreshBtn" class="btn btn-refresh" onclick="refreshData()" disabled style="padding:14px 18px;font-size:16px;">🔄 Refresh</button>
+        </div>
+
+        <div class="status-panel">
+            <h2>📊 Open Positions</h2>
+            <table class="positions-table">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Type</th>
+                        <th>Lots</th>
+                        <th>Price</th>
+                        <th>SL</th>
+                        <th>TP</th>
+                        <th>PNL</th>
+                    </tr>
+                </thead>
+                <tbody id="positionsBody"></tbody>
+                    <tr><td colspan="7" style="text-align: center;">No open positions</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="log-panel">
+            <h2>📋 Activity Log</h2>
+            <div class="log-entries" id="logEntries">
+                <div class="log-entry">[00:00:00] Dashboard initialized</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+
+        socket.on('status_update', function(data) {
+            updateDashboard(data);
+        });
+
+        function updateDashboard(data) {
+            // Bot status
+            const status = data.status || (data.running ? 'start' : 'stop');
+            localStorage.setItem('botStatus', status);
+            const statusElement = document.getElementById('botStatus');
+            if (status === 'start') {
+                statusElement.innerHTML = 'Bot Status: <span class="status-running">🟢 Running</span>';
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('refreshBtn').disabled = false;
+            } else {
+                statusElement.innerHTML = 'Bot Status: <span class="status-stopped">🔴 Stopped</span>';
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('refreshBtn').disabled = true;
+            }
+
+            // Symbols
+            document.getElementById('symbolsList').innerHTML = (data.symbols || [])
+                .map(symbol => `<span class="symbol-tag">${symbol}</span>`).join(' ') || '<span>No symbols</span>';
+            const current = (data.symbols && data.symbols.length) ? data.symbols[0] : 'BTCUSD';
+            const currentEl = document.getElementById('currentSymbol');
+            if (currentEl) currentEl.textContent = `Symbol: ${current}`;
+
+            // Account info
+            document.getElementById('balance').textContent = '$' + parseFloat(data.balance || 0).toFixed(2);
+            document.getElementById('equity').textContent = '$' + parseFloat(data.equity || 0).toFixed(2);
+            document.getElementById('freeMargin').textContent = '$' + parseFloat(data.free_margin || 0).toFixed(2);
+            document.getElementById('positionCount').textContent = data.positions ? data.positions.length : 0;
+            document.getElementById('marginLevel').textContent = `Margin Level: ${parseFloat(data.margin_level || 0).toFixed(2)}%`;
+
+            // Positions
+            const positionsBody = document.getElementById('positionsBody');
+            if (data.positions && data.positions.length > 0) {
+                positionsBody.innerHTML = '';
+                data.positions.forEach(pos => {
+                    const pnlClass = pos.pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
+                    const pnlText = (pos.pnl >= 0 ? '+' : '') + (pos.pnl || 0).toFixed(2);
+                    positionsBody.innerHTML += `
+                        <tr>
+                            <td><span class="symbol-tag">${pos.symbol}</span></td>
+                            <td>${pos.type}</td>
+                            <td>${parseFloat(pos.lots || 0).toFixed(2)}</td>
+                            <td>${parseFloat(pos.price || 0).toFixed(5)}</td>
+                            <td>${pos.sl > 0 ? parseFloat(pos.sl).toFixed(5) : 'None'}</td>
+                            <td>${pos.tp > 0 ? parseFloat(pos.tp).toFixed(5) : 'None'}</td>
+                            <td class="${pnlClass}">${pnlText}</td>
+                        </tr>
+                    `;
+                });
+            } else {
+                positionsBody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No open positions</td></tr>';
+            }
+
+            // Logs
+            const logEntries = document.getElementById('logEntries');
+            logEntries.innerHTML = (data.logs || [])
+                .slice().reverse()
+                .map(log => `<div class="log-entry">[${log.time}] ${log.message}</div>`)
+                .join('') || '<div class="log-entry">No logs available</div>';
+            logEntries.scrollTop = logEntries.scrollHeight;
+        }
+
+        function startBot() {
+            fetch('/api/start')
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) alert('Failed to start bot: ' + data.message);
+                })
+                .catch(error => alert('Error starting bot: ' + error));
+        }
+
+        function stopBot() {
+            fetch('/api/stop')
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) alert('Failed to stop bot: ' + data.message);
+                })
+                .catch(error => alert('Error stopping bot: ' + error));
+        }
+
+        function refreshData() {
+            fetch('/api/refresh')
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) alert('Failed to refresh data: ' + data.message);
+                })
+                .catch(error => alert('Error refreshing data: ' + error));
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => updateDashboard(data))
+                .catch(error => {
+                    console.error('Error loading initial data:', error);
+                    const savedStatus = localStorage.getItem('botStatus') || 'stop';
+                    updateDashboard({ status: savedStatus, running: savedStatus === 'start' });
+                });
+        });
+    </script>
+</body>
+</html>
